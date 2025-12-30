@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2026 灵马贺岁</title>
+    <style>
+        body { margin: 0; background: #87CEEB; overflow: hidden; font-family: "Microsoft YaHei", sans-serif; }
+        #start-btn {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 15px 40px; font-size: 20px; color: #fff;
+            background: linear-gradient(45deg, #1e90ff, #87CEEB);
+            border: none; border-radius: 50px; cursor: pointer; z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        #hud { position: fixed; top: 20px; width: 100%; text-align: center; color: #005f73; display: none; z-index: 100; font-weight: bold; }
+        #fortune-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            display: none; justify-content: center; align-items: center; z-index: 2000; perspective: 1200px;
+        }
+        .fortune-card {
+            width: 280px; min-height: 400px; background: #fffaf0; padding: 25px; border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center;
+            opacity: 0; transform: translateY(50px); transition: all 0.5s ease-out;
+        }
+        .fortune-card.show { opacity: 1; transform: translateY(0); }
+    </style>
+</head>
+<body>
+    <button id="start-btn">开启2026灵马好运</button>
+    <div id="hud">灵马奔腾中... (用力摇一摇)</div>
+    <div id="fortune-overlay"></div>
+
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+    <script>
+        const fortuneData = [
+            { type: "上吉", chen: "万籁齐鸣，独得其门。", song: "抢票一定轻松抢到，前排非你莫属！" },
+            { type: "特吉", chen: "圆融无碍，事事称金。", song: "全世界都为你开路，一切如愿！" }
+        ];
+
+        let scene, camera, renderer, mixer, clock = new THREE.Clock();
+        let isShowing = false, shakeCount = 0;
+
+        function init() {
+            scene = new THREE.Scene();
+            // 背景换成浅蓝色
+            scene.background = new THREE.Color(0x87CEEB); 
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 3000);
+            // 初始位置设高一点
+            camera.position.set(0, 50, 200); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            // 增强光照，确保马能被看清
+            scene.add(new THREE.AmbientLight(0xffffff, 2.5));
+            const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+            sun.position.set(10, 50, 10);
+            scene.add(sun);
+
+            const loader = new THREE.GLTFLoader();
+            loader.load('./horse.glb', (gltf) => {
+                const horse = gltf.scene;
+                
+
+                // 强制修正马的所有材质：变为深蓝色线框（在浅蓝背景下最清晰）或 纯黄
+                horse.traverse(child => {
+                    if (child.isMesh) {
+                        child.material.wireframe = true;
+                        child.material.color.set(0xFFD700); // 深蓝色线框
+                        child.material.skinning = true;
+                        child.frustumCulled = false; // 禁用视锥剔除，防止由于包围盒错误导致的消失
+                    }
+                });
+
+                // 核心：自动对齐相机到模型
+                const box = new THREE.Box3().setFromObject(horse);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                
+                // 缩放马
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const scale = 50 / maxDim;
+                horse.scale.set(scale, scale, scale);
+                
+                // 居中马
+                horse.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+                horse.rotation.y = Math.PI / 1.8; // 修正朝向
+
+                scene.add(horse);
+                camera.lookAt(0, 0, 0);
+
+                if (gltf.animations.length > 0) {
+                    mixer = new THREE.AnimationMixer(horse);
+                    mixer.clipAction(gltf.animations[0]).play();
+                }
+            }, undefined, (err) => alert("模型加载失败，请检查文件名！"));
+
+            animate();
+            setupShake();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (mixer) mixer.update(delta);
+            renderer.render(scene, camera);
+        }
+
+        function setupShake() {
+            let lastUpdate = 0, lastX, lastY, lastZ;
+            window.addEventListener('devicemotion', (e) => {
+                let now = Date.now();
+                if ((now - lastUpdate) > 100) {
+                    let diff = now - lastUpdate; lastUpdate = now;
+                    let acc = e.accelerationIncludingGravity;
+                    if(!acc || !acc.x) return;
+                    let speed = Math.abs(acc.x + acc.y + acc.z - lastX - lastY - lastZ) / diff * 10000;
+                    if (speed > 25) {
+                        if (isShowing) hideFortune();
+                        else if (shakeCount < 3) showFortune();
+                    }
+                    lastX = acc.x; lastY = acc.y; lastZ = acc.z;
+                }
+            });
+        }
+
+        function showFortune() {
+            if (isShowing) return;
+            isShowing = true; shakeCount++;
+            const data = fortuneData[Math.floor(Math.random() * fortuneData.length)];
+            const overlay = document.getElementById('fortune-overlay');
+            overlay.innerHTML = `<div class="fortune-card" id="active-card">
+                <div style="font-size: 24px; color:#d44d5c; font-weight:bold; margin-bottom:20px;">🧧 ${data.type}</div>
+                <div style="writing-mode: vertical-rl; font-size: 20px; color:#333; height:150px;">${data.chen}</div>
+                <p style="color:#666; font-size:14px; margin-top:30px;">${data.song}</p>
+            </div>`;
+            overlay.style.display = 'flex';
+            setTimeout(() => document.getElementById('active-card').classList.add('show'), 50);
+        }
+
+        function hideFortune() {
+            const card = document.getElementById('active-card');
+            if(card) card.classList.remove('show');
+            setTimeout(() => { document.getElementById('fortune-overlay').style.display = 'none'; isShowing = false; }, 500);
+        }
+
+        document.getElementById('start-btn').onclick = function() {
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission().then(res => { if(res==='granted') startApp(); });
+            } else { startApp(); }
+        };
+
+        function startApp() {
+            document.getElementById('start-btn').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            init();
+        }
+    </script>
+</body>
+</html>
